@@ -1,0 +1,30 @@
+{
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080
+    },
+    "mavlink": {
+        "host": "127.0.0.1",
+        "port": 5760,
+        "connection": "tcp",
+        "heartbeat_timeout_s": 3,
+        "message_rate_hz": 4
+    },
+    "sdr": {
+        "host": "uav-pi.local",
+        "port": 1234,
+        "frequency": 100000000,
+        "sample_rate": 2400000,
+        "gain": 40
+    },
+    "mission": {
+        "default_altitude_m": 30,
+        "rtl_altitude_m": 20,
+        "max_flight_time_s": 600
+    },
+    "groundstation": {
+        "name": "RAVEN-GCS-01",
+        "operator": "LJW",
+        "classification": "UNCLASSIFIED // FOR TRAINING PURPOSES ONLY"
+    }
+}
