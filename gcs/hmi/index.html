@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAVEN GCS — Ground Control Station</title>
+
+<!-- Leaflet for map -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+/* ── Fonts ─────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap');
+
+/* ── CSS Variables ─────────────────────────────────────────── */
+:root {
+  --bg-primary:    #080c0f;
+  --bg-secondary:  #0d1318;
+  --bg-panel:      #0f1923;
+  --bg-panel-alt:  #111d26;
+  --border:        #1a2d3d;
+  --border-bright: #1e3d52;
+
+  --text-primary:  #c8dce8;
+  --text-dim:      #4a6272;
+  --text-label:    #3a5566;
+
+  --green:         #00e676;
+  --green-dim:     #004d25;
+  --amber:         #ffc107;
+  --amber-dim:     #4a3800;
+  --red:           #ff1744;
+  --red-dim:       #4a0011;
+  --blue:          #00b0ff;
+  --blue-dim:      #003344;
+
+  --classification-bg:    #006400;
+  --classification-text:  #ffffff;
+
+  --font-mono:     'Share Tech Mono', monospace;
+  --font-ui:       'Barlow Condensed', sans-serif;
+
+  --panel-gap:     6px;
+  --border-radius: 2px;
+}
+
+/* ── Reset ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+/* ── Layout ────────────────────────────────────────────────── */
+.layout {
+  display: grid;
+  height: 100vh;
+  grid-template-rows: 24px 1fr 32px 24px;
+  grid-template-columns: 240px 1fr 260px;
+  grid-template-areas:
+    "banner   banner   banner"
+    "left     center   right"
+    "bottom   bottom   bottom"
+    "banner2  banner2  banner2";
+  gap: var(--panel-gap);
+  padding: var(--panel-gap);
+  background: #050809;
+}
+
+.banner2 {
+  grid-area: banner2;
+  background: var(--classification-bg);
+  color: var(--classification-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.15em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--border-radius);
+  text-transform: uppercase;
+}
+
+/* ── Classification Banner ─────────────────────────────────── */
+.banner {
+  grid-area: banner;
+  background: var(--classification-bg);
+  color: var(--classification-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.15em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--border-radius);
+  text-transform: uppercase;
+}
+
+/* ── Panel Base ────────────────────────────────────────────── */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.panel-header .indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.panel-header .indicator.online  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.panel-header .indicator.fault   { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
+.panel-header .indicator.warning { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ── Left Panel — Telemetry ────────────────────────────────── */
+.left-panel { grid-area: left; }
+
+.telem-section {
+  margin-bottom: 10px;
+}
+
+.telem-section-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3px;
+  margin-bottom: 6px;
+}
+
+.telem-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.telem-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.telem-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.telem-value.large {
+  font-size: 20px;
+  color: var(--blue);
+}
+
+.telem-value.null-val { color: var(--text-dim); }
+
+/* Status badges */
+.status-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 2px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.status-badge.green  { background: var(--green-dim);  color: var(--green);  border: 1px solid var(--green); }
+.status-badge.amber  { background: var(--amber-dim);  color: var(--amber);  border: 1px solid var(--amber); }
+.status-badge.red    { background: var(--red-dim);    color: var(--red);    border: 1px solid var(--red);   }
+.status-badge.blue   { background: var(--blue-dim);   color: var(--blue);   border: 1px solid var(--blue);  }
+.status-badge.dim    { background: #111;              color: var(--text-dim); border: 1px solid var(--border); }
+
+/* System mode display */
+.mode-display {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  padding: 8px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.mode-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.mode-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 0.2em;
+  margin-top: 2px;
+}
+
+.mode-value.STANDBY  { color: var(--blue); }
+.mode-value.PREFLIGHT{ color: var(--amber); }
+.mode-value.MISSION  { color: var(--green); }
+.mode-value.RTL      { color: var(--amber); }
+.mode-value.FAULT    { color: var(--red); animation: blink 1s step-end infinite; }
+
+@keyframes blink { 50% { opacity: 0.3; } }
+
+/* Battery bar */
+.battery-bar-wrap {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  height: 8px;
+  width: 100%;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.battery-bar {
+  height: 100%;
+  transition: width 0.5s ease, background 0.5s ease;
+}
+
+/* ── Center Panel — Map ─────────────────────────────────────── */
+.center-panel { grid-area: center; }
+
+#map {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Leaflet dark override */
+.leaflet-container { background: #080c0f; }
+.leaflet-tile { filter: brightness(0.5) saturate(0.6) hue-rotate(195deg); }
+.leaflet-control-zoom a {
+  background: var(--bg-panel) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+}
+
+/* UAV marker */
+.uav-marker-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Map overlay info */
+.map-overlay {
+  position: absolute;
+  top: 44px;
+  left: 8px;
+  z-index: 1000;
+  background: rgba(8,12,15,0.85);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.map-overlay span { color: var(--blue); }
+
+/* ── Right Panel — SDR Spectrum ─────────────────────────────── */
+.right-panel { grid-area: right; }
+
+#spectrum-canvas {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: block;
+  background: var(--bg-primary);
+}
+
+.sdr-info {
+  padding: 6px 8px;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sdr-freq { color: var(--blue); font-size: 13px; }
+
+/* Waterfall canvas */
+#waterfall-canvas {
+  width: 100%;
+  height: 120px;
+  display: block;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Bottom Bar ─────────────────────────────────────────────── */
+.bottom-bar {
+  grid-area: bottom;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius);
+  padding: 0 10px;
+}
+
+/* Alert ticker */
+.alert-ticker {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+}
+
+.alert-ticker.INFO   { color: var(--blue); }
+.alert-ticker.AMBER  { color: var(--amber); }
+.alert-ticker.RED    { color: var(--red); animation: blink 0.5s step-end infinite; }
+
+/* Uptime */
+.uptime {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Operator buttons */
+.op-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 3px 12px;
+  cursor: pointer;
+  background: transparent;
+  transition: all 0.15s ease;
+}
+
+.op-btn.arm     { color: var(--green); border-color: var(--green); }
+.op-btn.arm:hover { background: var(--green-dim); }
+.op-btn.disarm  { color: var(--amber); border-color: var(--amber); }
+.op-btn.disarm:hover { background: var(--amber-dim); }
+.op-btn.abort   { color: var(--red); border-color: var(--red); font-weight: bold; }
+.op-btn.abort:hover { background: var(--red-dim); }
+
+/* Divider */
+.divider { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+
+/* Mission info in bottom bar */
+.mission-info {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.mission-info span { color: var(--text-primary); }
+
+/* ── SDR Controls ───────────────────────────────────────────── */
+.sdr-controls {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+}
+
+.sdr-ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.sdr-ctrl-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.sdr-ctrl-val {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--blue);
+  width: 24px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.sdr-input {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  outline: none;
+  min-width: 0;
+}
+
+.sdr-input:focus { border-color: var(--blue); }
+
+.sdr-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  background: var(--blue-dim);
+  border-radius: 2px;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sdr-btn:hover { background: #004466; }
+
+.sdr-slider {
+  flex: 1;
+  accent-color: var(--blue);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.sdr-presets {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sdr-preset-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  border-radius: 2px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.sdr-preset-btn:hover { color: var(--blue); border-color: var(--blue); }
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- Classification Banner Top -->
+  <div class="banner">
+    UNCLASSIFIED // FOR TRAINING PURPOSES ONLY
+  </div>
+
+  <!-- ── Left Panel — Telemetry ── -->
+  <div class="panel left-panel">
+    <div class="panel-header">
+      <span>AVS TELEMETRY</span>
+      <div class="indicator" id="telem-indicator"></div>
+    </div>
+    <div class="panel-body">
+
+      <!-- System Mode -->
+      <div class="mode-display">
+        <div class="mode-label">SYSTEM MODE</div>
+        <div class="mode-value STANDBY" id="mode-value">STANDBY</div>
+      </div>
+
+      <!-- Position -->
+      <div class="telem-section">
+        <div class="telem-section-label">Position</div>
+        <div class="telem-row">
+          <span class="telem-label">LAT</span>
+          <span class="telem-value" id="t-lat">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">LON</span>
+          <span class="telem-value" id="t-lon">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">ALT (m)</span>
+          <span class="telem-value large" id="t-alt">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">HDG (°)</span>
+          <span class="telem-value" id="t-hdg">—</span>
+        </div>
+      </div>
+
+      <!-- Velocity -->
+      <div class="telem-section">
+        <div class="telem-section-label">Velocity</div>
+        <div class="telem-row">
+          <span class="telem-label">AIRSPD (m/s)</span>
+          <span class="telem-value" id="t-airspd">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">GNDSPD (m/s)</span>
+          <span class="telem-value" id="t-gndspd">—</span>
+        </div>
+      </div>
+
+      <!-- Power -->
+      <div class="telem-section">
+        <div class="telem-section-label">Power</div>
+        <div class="telem-row">
+          <span class="telem-label">VOLTAGE</span>
+          <span class="telem-value" id="t-batt-v">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">BATTERY</span>
+          <span class="telem-value" id="t-batt-pct">—</span>
+        </div>
+        <div class="battery-bar-wrap">
+          <div class="battery-bar" id="battery-bar" style="width:0%;background:var(--green)"></div>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="telem-section">
+        <div class="telem-section-label">Status</div>
+        <div class="telem-row">
+          <span class="telem-label">FLIGHT MODE</span>
+          <span class="status-badge dim" id="t-fmode">—</span>
+        </div>
+        <div class="telem-row" style="margin-top:4px">
+          <span class="telem-label">ARMED</span>
+          <span class="status-badge dim" id="t-armed">DISARMED</span>
+        </div>
+        <div class="telem-row" style="margin-top:4px">
+          <span class="telem-label">GPS FIX</span>
+          <span class="status-badge dim" id="t-gps">—</span>
+        </div>
+        <div class="telem-row" style="margin-top:4px">
+          <span class="telem-label">LINK</span>
+          <span class="status-badge dim" id="t-link">—</span>
+        </div>
+        <div class="telem-row" style="margin-top:4px">
+          <span class="telem-label">HB AGE</span>
+          <span class="telem-value" id="t-hb">—</span>
+        </div>
+      </div>
+
+      <!-- Mission -->
+      <div class="telem-section">
+        <div class="telem-section-label">Mission</div>
+        <div class="telem-row">
+          <span class="telem-label">WAYPOINTS</span>
+          <span class="telem-value" id="m-wpc">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">CURRENT WP</span>
+          <span class="telem-value" id="m-cwp">—</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Center Panel — Map ── -->
+  <div class="panel center-panel" style="position:relative;">
+    <div class="panel-header">
+      <span>MISSION MAP</span>
+      <span id="map-coord" style="font-size:9px;color:var(--text-dim);">ACQUIRING POSITION...</span>
+    </div>
+    <div id="map" style="flex:1;min-height:0;"></div>
+    <div class="map-overlay" id="map-overlay">
+      GCS &nbsp;|&nbsp; <span id="overlay-coord">—</span>
+    </div>
+  </div>
+
+  <!-- ── Right Panel — SDR ── -->
+  <div class="panel right-panel">
+    <div class="panel-header">
+      <span>RF SPECTRUM</span>
+      <div class="indicator" id="sdr-indicator"></div>
+    </div>
+    <canvas id="spectrum-canvas"></canvas>
+    <canvas id="waterfall-canvas"></canvas>
+    <div class="sdr-info">
+      <span>FREQ: <span class="sdr-freq" id="sdr-freq">—</span></span>
+      <span id="sdr-gain">GAIN: —</span>
+      <span id="sdr-rate">SR: —</span>
+    </div>
+
+    <!-- SDR Controls -->
+    <div class="sdr-controls">
+      <div class="sdr-ctrl-row">
+        <span class="sdr-ctrl-label">FREQ (MHz)</span>
+        <input class="sdr-input" id="sdr-freq-input" type="number"
+               step="0.1" min="0.5" max="1766" value="100.0"
+               onkeydown="if(event.key==='Enter') tuneSDR()"/>
+        <button class="sdr-btn" onclick="tuneSDR()">SET</button>
+      </div>
+      <div class="sdr-ctrl-row">
+        <span class="sdr-ctrl-label">GAIN (dB)</span>
+        <input class="sdr-slider" id="sdr-gain-slider" type="range"
+               min="0" max="49" value="40" oninput="updateGainLabel(this.value)"/>
+        <span class="sdr-ctrl-val" id="sdr-gain-val">40</span>
+      </div>
+      <div class="sdr-presets">
+        <span class="sdr-ctrl-label">BAND</span>
+        <button class="sdr-preset-btn" onclick="tunePreset(100.0)">FM</button>
+        <button class="sdr-preset-btn" onclick="tunePreset(121.5)">VHF AIR</button>
+        <button class="sdr-preset-btn" onclick="tunePreset(156.8)">MARINE</button>
+        <button class="sdr-preset-btn" onclick="tunePreset(433.0)">ISM 433</button>
+        <button class="sdr-preset-btn" onclick="tunePreset(915.0)">ISM 915</button>
+      </div>
+      <div class="sdr-ctrl-row" style="margin-top:4px;">
+        <span class="sdr-ctrl-label">AUDIO</span>
+        <button class="sdr-btn" id="audio-btn" onclick="toggleAudio()" style="flex:1;">
+          ▶ LISTEN
+        </button>
+        <span class="sdr-ctrl-val" id="audio-status" style="width:auto;font-size:9px;">OFF</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Bottom Bar ── -->
+  <div class="bottom-bar">
+    <div class="alert-ticker" id="alert-ticker">SYSTEM NOMINAL</div>
+    <div class="divider"></div>
+    <div class="mission-info">
+      WP <span id="bot-wp">—</span> / <span id="bot-wpc">—</span>
+      &nbsp;|&nbsp;
+      UPTIME <span id="bot-uptime">00:00:00</span>
+    </div>
+    <div class="divider"></div>
+    <button class="op-btn arm"    onclick="sendCmd('arm')">ARM</button>
+    <button class="op-btn disarm" onclick="sendCmd('disarm')">DISARM</button>
+    <div class="divider"></div>
+    <button class="op-btn abort"  onclick="sendCmd('abort')">⚠ ABORT / RTL</button>
+  </div>
+
+  <!-- Classification Banner Bottom -->
+  <div class="banner2">
+    UNCLASSIFIED // FOR TRAINING PURPOSES ONLY
+  </div>
+
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────
+const API_BASE    = 'http://localhost:8080';
+const POLL_RATE   = 500; // ms — 2Hz
+
+// ── Map Setup ────────────────────────────────────────────────
+let map, uavMarker, groundTrack, waypointLayer;
+let trackPoints = [];
+let mapInitialized = false;
+let userLat = null, userLon = null;
+
+function initMap(lat, lon) {
+  map = L.map('map', {
+    center: [lat, lon],
+    zoom: 16,
+    zoomControl: true,
+    attributionControl: false
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+  }).addTo(map);
+
+  // GCS marker
+  L.circleMarker([lat, lon], {
+    radius: 8,
+    color: '#00b0ff',
+    fillColor: '#00b0ff',
+    fillOpacity: 0.8,
+    weight: 2
+  }).addTo(map).bindTooltip('GCS', { permanent: false });
+
+  document.getElementById('overlay-coord').textContent =
+    `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+
+  // UAV marker (SVG drone icon)
+  const uavIcon = L.divIcon({
+    className: 'uav-marker-icon',
+    html: `<svg width="20" height="20" viewBox="0 0 20 20">
+      <circle cx="10" cy="10" r="4" fill="#ff1744" stroke="#fff" stroke-width="1.5"/>
+      <line x1="10" y1="0"  x2="10" y2="7"  stroke="#ff1744" stroke-width="2"/>
+      <line x1="10" y1="13" x2="10" y2="20" stroke="#ff1744" stroke-width="2"/>
+      <line x1="0"  y1="10" x2="7"  y2="10" stroke="#ff1744" stroke-width="2"/>
+      <line x1="13" y1="10" x2="20" y2="10" stroke="#ff1744" stroke-width="2"/>
+    </svg>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10]
+  });
+
+  uavMarker = L.marker([lat, lon], { icon: uavIcon }).addTo(map);
+
+  // Ground track polyline
+  groundTrack = L.polyline([], {
+    color: '#00e676',
+    weight: 1.5,
+    opacity: 0.7
+  }).addTo(map);
+
+  waypointLayer = L.layerGroup().addTo(map);
+  mapInitialized = true;
+}
+
+// Get user geolocation, fall back to State College PA
+function setupMap() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        userLat = pos.coords.latitude;
+        userLon = pos.coords.longitude;
+        initMap(userLat, userLon);
+        document.getElementById('map-coord').textContent =
+          `GCS ${userLat.toFixed(4)}, ${userLon.toFixed(4)}`;
+      },
+      () => {
+        // Fallback — State College, PA
+        initMap(40.7934, -77.8600);
+        document.getElementById('map-coord').textContent = 'GCS DEFAULT: STATE COLLEGE PA';
+      },
+      { timeout: 5000 }
+    );
+  } else {
+    initMap(40.7934, -77.8600);
+  }
+}
+
+// Update UAV position on map
+function updateUAVPosition(lat, lon) {
+  if (!mapInitialized || lat === null || lon === null) return;
+  uavMarker.setLatLng([lat, lon]);
+  trackPoints.push([lat, lon]);
+  groundTrack.setLatLngs(trackPoints);
+
+  // Update map coord display
+  document.getElementById('map-coord').textContent =
+    `UAV ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
+// ── Spectrum Canvas ──────────────────────────────────────────
+const specCanvas = document.getElementById('spectrum-canvas');
+const specCtx    = specCanvas.getContext('2d');
+const wfCanvas   = document.getElementById('waterfall-canvas');
+const wfCtx      = wfCanvas.getContext('2d');
+
+// Waterfall image data
+let waterfallData = null;
+
+function resizeCanvases() {
+  specCanvas.width  = specCanvas.offsetWidth;
+  specCanvas.height = specCanvas.offsetHeight;
+  wfCanvas.width    = wfCanvas.offsetWidth;
+  wfCanvas.height   = wfCanvas.offsetHeight;
+  waterfallData     = null;
+}
+
+function drawSpectrum(bins) {
+  if (!bins || bins.length === 0) return;
+  const W = specCanvas.width;
+  const H = specCanvas.height;
+  const ctx = specCtx;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#080c0f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = '#1a2d3d';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = (H / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+
+  // dB range
+  const minDb = -60;
+  const maxDb = 40;
+  const range = maxDb - minDb;
+
+  // Spectrum fill
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+
+  for (let i = 0; i < bins.length; i++) {
+    const x = (i / bins.length) * W;
+    const db = Math.max(minDb, Math.min(maxDb, bins[i]));
+    const y = H - ((db - minDb) / range) * H;
+    if (i === 0) ctx.lineTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+
+  ctx.lineTo(W, H);
+  ctx.closePath();
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0,   'rgba(0, 176, 255, 0.8)');
+  grad.addColorStop(0.5, 'rgba(0, 230, 118, 0.5)');
+  grad.addColorStop(1,   'rgba(0, 176, 255, 0.05)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Spectrum line
+  ctx.beginPath();
+  ctx.strokeStyle = '#00b0ff';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < bins.length; i++) {
+    const x = (i / bins.length) * W;
+    const db = Math.max(minDb, Math.min(maxDb, bins[i]));
+    const y = H - ((db - minDb) / range) * H;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // dB labels
+  ctx.fillStyle = '#3a5566';
+  ctx.font = '9px Share Tech Mono';
+  ctx.fillText(`${maxDb} dB`, 4, 10);
+  ctx.fillText(`${minDb} dB`, 4, H - 4);
+}
+
+function drawWaterfall(bins) {
+  if (!bins || bins.length === 0) return;
+  const W = wfCanvas.width;
+  const H = wfCanvas.height;
+
+  if (!waterfallData || waterfallData.width !== W || waterfallData.height !== H) {
+    waterfallData = wfCtx.createImageData(W, H);
+  }
+
+  // Scroll existing waterfall down by 1 row
+  const rowBytes = W * 4;
+  waterfallData.data.copyWithin(rowBytes, 0, (H - 1) * rowBytes);
+
+  // Write new top row
+  const minDb = -60, maxDb = 40, range = maxDb - minDb;
+  for (let x = 0; x < W; x++) {
+    const binIdx = Math.floor((x / W) * bins.length);
+    const db     = Math.max(minDb, Math.min(maxDb, bins[binIdx]));
+    const norm   = (db - minDb) / range;
+
+    // Color map: black → blue → cyan → green → yellow → red
+    let r, g, b;
+    if (norm < 0.25) {
+      r = 0; g = 0; b = Math.floor(norm * 4 * 255);
+    } else if (norm < 0.5) {
+      const t = (norm - 0.25) * 4;
+      r = 0; g = Math.floor(t * 176); b = 255;
+    } else if (norm < 0.75) {
+      const t = (norm - 0.5) * 4;
+      r = Math.floor(t * 255); g = 230; b = Math.floor((1 - t) * 255);
+    } else {
+      const t = (norm - 0.75) * 4;
+      r = 255; g = Math.floor((1 - t) * 230); b = 0;
+    }
+
+    const idx = x * 4;
+    waterfallData.data[idx]     = r;
+    waterfallData.data[idx + 1] = g;
+    waterfallData.data[idx + 2] = b;
+    waterfallData.data[idx + 3] = 255;
+  }
+
+  wfCtx.putImageData(waterfallData, 0, 0);
+}
+
+// ── Telemetry Update ─────────────────────────────────────────
+function fmt(val, decimals = 2, unit = '') {
+  if (val === null || val === undefined) return '—';
+  return val.toFixed(decimals) + unit;
+}
+
+function updateTelemetry(telem) {
+  document.getElementById('t-lat').textContent    = fmt(telem.lat, 5, '°');
+  document.getElementById('t-lon').textContent    = fmt(telem.lon, 5, '°');
+  document.getElementById('t-alt').textContent    = fmt(telem.alt, 1, ' m');
+  document.getElementById('t-hdg').textContent    = fmt(telem.heading, 1, '°');
+  document.getElementById('t-airspd').textContent = fmt(telem.airspeed, 1);
+  document.getElementById('t-gndspd').textContent = fmt(telem.groundspeed, 1);
+  document.getElementById('t-batt-v').textContent = fmt(telem.battery_v, 2, ' V');
+  document.getElementById('t-hb').textContent     = fmt(telem.heartbeat_age, 2, ' s');
+
+  // Battery
+  const pct = telem.battery_pct;
+  document.getElementById('t-batt-pct').textContent = pct !== null ? `${pct}%` : '—';
+  const bar = document.getElementById('battery-bar');
+  bar.style.width = pct !== null ? `${pct}%` : '0%';
+  bar.style.background = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--amber)' : 'var(--red)';
+
+  // Flight mode badge
+  const fmodeEl = document.getElementById('t-fmode');
+  fmodeEl.textContent = telem.flight_mode || '—';
+  fmodeEl.className = 'status-badge ' + (telem.flight_mode ? 'blue' : 'dim');
+
+  // Armed badge
+  const armedEl = document.getElementById('t-armed');
+  armedEl.textContent = telem.armed ? 'ARMED' : 'DISARMED';
+  armedEl.className = 'status-badge ' + (telem.armed ? 'red' : 'green');
+
+  // GPS fix
+  const gpsEl = document.getElementById('t-gps');
+  const gpsLabels = ['NO FIX', 'NO FIX', '2D FIX', '3D FIX', 'DGPS', 'RTK'];
+  const fix = telem.gps_fix;
+  gpsEl.textContent = fix !== null ? (gpsLabels[fix] || `FIX ${fix}`) : '—';
+  gpsEl.className = 'status-badge ' + (fix >= 3 ? 'green' : fix >= 2 ? 'amber' : 'red');
+
+  // Link status
+  const linkEl = document.getElementById('t-link');
+  linkEl.textContent = telem.connected ? 'ONLINE' : 'OFFLINE';
+  linkEl.className = 'status-badge ' + (telem.connected ? 'green' : 'red');
+
+  // Telem indicator
+  document.getElementById('telem-indicator').className =
+    'indicator ' + (telem.connected ? 'online' : 'fault');
+
+  // Map position
+  updateUAVPosition(telem.lat, telem.lon);
+
+  // Bottom bar WP
+  document.getElementById('bot-wp').textContent =
+    telem.connected ? (document.getElementById('m-cwp').textContent) : '—';
+}
+
+function updateMission(mission) {
+  document.getElementById('m-wpc').textContent = mission.waypoint_count ?? '—';
+  document.getElementById('m-cwp').textContent = mission.current_wp ?? '—';
+  document.getElementById('bot-wpc').textContent = mission.waypoint_count ?? '—';
+}
+
+function updateMode(mode) {
+  const el = document.getElementById('mode-value');
+  el.textContent = mode;
+  el.className = 'mode-value ' + mode;
+}
+
+function updateUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  document.getElementById('bot-uptime').textContent =
+    `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function updateAlerts(alerts) {
+  if (!alerts || alerts.length === 0) return;
+  const latest = alerts[alerts.length - 1];
+  const el = document.getElementById('alert-ticker');
+  el.textContent = `[${latest.level}] ${latest.message}`;
+  el.className = 'alert-ticker ' + latest.level;
+}
+
+function updateSDR(sdr) {
+  document.getElementById('sdr-indicator').className =
+    'indicator ' + (sdr.connected ? 'online' : '');
+
+  if (sdr.frequency !== null) {
+    document.getElementById('sdr-freq').textContent =
+      (sdr.frequency / 1e6).toFixed(3) + ' MHz';
+  }
+  if (sdr.gain !== null) {
+    document.getElementById('sdr-gain').textContent = `GAIN: ${sdr.gain} dB`;
+  }
+  if (sdr.sample_rate !== null) {
+    document.getElementById('sdr-rate').textContent =
+      `SR: ${(sdr.sample_rate / 1e6).toFixed(1)} MSPS`;
+  }
+
+  if (sdr.spectrum && sdr.spectrum.length > 0) {
+    drawSpectrum(sdr.spectrum);
+    drawWaterfall(sdr.spectrum);
+  }
+}
+
+// ── SDR Audio ─────────────────────────────────────────────────
+let audioCtx    = null;
+let audioActive = false;
+let audioReader = null;
+
+async function toggleAudio() {
+  if (audioActive) {
+    stopAudio();
+  } else {
+    startAudio();
+  }
+}
+
+async function startAudio() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 48000
+    });
+
+    const btn    = document.getElementById('audio-btn');
+    const status = document.getElementById('audio-status');
+    btn.textContent = '■ STOP';
+    status.textContent = 'CONNECTING...';
+    status.style.color = 'var(--amber)';
+    audioActive = true;
+
+    const response = await fetch(API_BASE + '/api/sdr/audio');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    status.textContent = 'LIVE';
+    status.style.color = 'var(--green)';
+
+    const reader = response.body.getReader();
+    audioReader  = reader;
+
+    // PCM parameters: 48kHz mono int16
+    const SAMPLE_RATE  = 48000;
+    const CHUNK_BYTES  = 9600;  // 4800 samples × 2 bytes
+    let   buffer       = new Uint8Array(0);
+    let   playTime     = audioCtx.currentTime + 0.1;
+
+    while (audioActive) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      // Append to buffer
+      const combined = new Uint8Array(buffer.length + value.length);
+      combined.set(buffer);
+      combined.set(value, buffer.length);
+      buffer = combined;
+
+      // Process complete chunks
+      while (buffer.length >= CHUNK_BYTES) {
+        const chunk   = buffer.slice(0, CHUNK_BYTES);
+        buffer        = buffer.slice(CHUNK_BYTES);
+
+        // Convert int16 PCM to float32
+        const int16   = new Int16Array(chunk.buffer);
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+          float32[i] = int16[i] / 32768.0;
+        }
+
+        // Create and schedule audio buffer
+        const audioBuf = audioCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+        audioBuf.getChannelData(0).set(float32);
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuf;
+        source.connect(audioCtx.destination);
+
+        // Schedule ahead to prevent gaps
+        const now = audioCtx.currentTime;
+        if (playTime < now) playTime = now + 0.05;
+        source.start(playTime);
+        playTime += audioBuf.duration;
+      }
+    }
+  } catch(e) {
+    console.error('Audio error:', e);
+    document.getElementById('audio-status').textContent = 'ERR';
+    document.getElementById('audio-status').style.color = 'var(--red)';
+  }
+  stopAudio();
+}
+
+function stopAudio() {
+  audioActive = false;
+  if (audioReader) { audioReader.cancel(); audioReader = null; }
+  if (audioCtx)    { audioCtx.close();    audioCtx    = null; }
+  const btn    = document.getElementById('audio-btn');
+  const status = document.getElementById('audio-status');
+  if (btn)    btn.textContent    = '▶ LISTEN';
+  if (status) { status.textContent = 'OFF'; status.style.color = 'var(--text-dim)'; }
+}
+
+// ── SDR Controls ─────────────────────────────────────────────
+async function tuneSDR() {
+  const mhz = parseFloat(document.getElementById('sdr-freq-input').value);
+  if (isNaN(mhz) || mhz < 0.5 || mhz > 1766) {
+    alert('Frequency must be between 0.5 and 1766 MHz');
+    return;
+  }
+  const hz = Math.round(mhz * 1e6);
+  try {
+    await fetch(API_BASE + '/api/sdr/tune', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frequency: hz })
+    });
+    document.getElementById('sdr-freq').textContent = mhz.toFixed(3) + ' MHz';
+  } catch(e) { console.error('Tune failed:', e); }
+}
+
+function tunePreset(mhz) {
+  document.getElementById('sdr-freq-input').value = mhz.toFixed(1);
+  tuneSDR();
+}
+
+function updateGainLabel(val) {
+  document.getElementById('sdr-gain-val').textContent = val;
+  fetch(API_BASE + '/api/sdr/gain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gain: parseInt(val) })
+  }).catch(e => console.error('Gain failed:', e));
+}
+
+// ── Commands ─────────────────────────────────────────────────
+async function sendCmd(cmd) {
+  const endpoints = {
+    arm:    '/api/arm',
+    disarm: '/api/disarm',
+    abort:  '/api/abort'
+  };
+
+  if (cmd === 'abort') {
+    if (!confirm('⚠ CONFIRM ABORT — Initiate Return To Launch?')) return;
+  }
+
+  try {
+    const res = await fetch(API_BASE + endpoints[cmd], { method: 'POST' });
+    const data = await res.json();
+    console.log(`CMD ${cmd}:`, data);
+  } catch (e) {
+    console.error(`CMD ${cmd} failed:`, e);
+  }
+}
+
+// ── Poll Loop ────────────────────────────────────────────────
+async function poll() {
+  try {
+    const res  = await fetch(API_BASE + '/api/status');
+    const data = await res.json();
+
+    updateMode(data.system?.mode);
+    updateUptime(data.system?.uptime || 0);
+    updateTelemetry(data.telemetry);
+    updateMission(data.mission);
+    updateAlerts(data.alerts);
+    updateSDR(data.sdr);
+
+  } catch (e) {
+    document.getElementById('telem-indicator').className = 'indicator fault';
+    document.getElementById('alert-ticker').textContent  = '[RED] GCS DAEMON OFFLINE';
+    document.getElementById('alert-ticker').className    = 'alert-ticker RED';
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  resizeCanvases();
+  window.addEventListener('resize', () => {
+    resizeCanvases();
+    if (map) map.invalidateSize();
+  });
+
+  setupMap();
+  poll();
+  setInterval(poll, POLL_RATE);
+});
+</script>
+</body>
+</html>

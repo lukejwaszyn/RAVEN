@@ -16,14 +16,13 @@ import asyncio
 import json
 import logging
 import os
-import signal
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiohttp import web
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -39,127 +38,141 @@ def load_config():
         return json.load(f)
 
 # ── System State ──────────────────────────────────────────────────────────────
-# Single shared state object — all modules read/write here
-# HMI polls this via REST API
 state = {
     "system": {
-        "mode":         "STANDBY",   # STANDBY | PREFLIGHT | MISSION | RTL | FAULT
-        "timestamp":    None,
-        "uptime":       0,
+        "mode":      "STANDBY",
+        "timestamp": None,
+        "uptime":    0,
     },
     "telemetry": {
-        "connected":    False,
-        "lat":          None,
-        "lon":          None,
-        "alt":          None,
-        "heading":      None,
-        "airspeed":     None,
-        "groundspeed":  None,
-        "battery_v":    None,
-        "battery_pct":  None,
-        "gps_fix":      None,
-        "flight_mode":  None,
-        "armed":        False,
-        "heartbeat_age":None,        # seconds since last heartbeat
+        "connected":     False,
+        "lat":           None,
+        "lon":           None,
+        "alt":           None,
+        "heading":       None,
+        "airspeed":      None,
+        "groundspeed":   None,
+        "battery_v":     None,
+        "battery_pct":   None,
+        "gps_fix":       None,
+        "flight_mode":   None,
+        "armed":         False,
+        "heartbeat_age": None,
     },
     "mission": {
-        "active":       False,
+        "active":         False,
         "waypoint_count": 0,
-        "current_wp":   None,
-        "mission_time": None,
+        "current_wp":     None,
+        "mission_time":   None,
     },
     "sdr": {
-        "connected":    False,
-        "frequency":    None,
-        "sample_rate":  None,
-        "gain":         None,
-        "spectrum":     [],          # latest FFT bins for HMI waterfall
+        "connected":   False,
+        "frequency":   None,
+        "sample_rate": None,
+        "gain":        None,
+        "spectrum":    [],
     },
     "link": {
         "wifi_active":  False,
         "latency_ms":   None,
         "link_quality": None,
     },
-    "alerts": []                     # list of {level, message, timestamp}
+    "alerts": []
 }
 
 def push_alert(level: str, message: str):
-    """Add an alert to the state. level: INFO | AMBER | RED"""
     state["alerts"].append({
         "level":     level,
         "message":   message,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
-    # Keep last 50 alerts
     state["alerts"] = state["alerts"][-50:]
     log.warning(f"ALERT [{level}] {message}")
 
 # ── REST API Handlers ─────────────────────────────────────────────────────────
 
+async def handle_health(request):
+    return web.json_response({
+        "status":    "OK",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode":      state["system"]["mode"]
+    })
+
 async def handle_status(request):
-    """GET /api/status — full system state"""
     return web.json_response(state)
 
 async def handle_telemetry(request):
-    """GET /api/telemetry — AVS telemetry only"""
     return web.json_response(state["telemetry"])
 
 async def handle_mission(request):
-    """GET /api/mission — mission state"""
     return web.json_response(state["mission"])
 
 async def handle_sdr(request):
-    """GET /api/sdr — SDR state and latest spectrum"""
     return web.json_response(state["sdr"])
 
 async def handle_alerts(request):
-    """GET /api/alerts — alert annunciator list"""
     return web.json_response(state["alerts"])
 
 async def handle_abort(request):
-    """POST /api/abort — trigger RTL on AVS"""
     log.warning("ABORT COMMAND RECEIVED — triggering RTL")
     state["system"]["mode"] = "RTL"
     push_alert("RED", "ABORT commanded by operator — RTL initiated")
-    # MAVLink RTL command sent by mavlink_module (hooked in Phase 2)
     return web.json_response({"status": "RTL_COMMANDED"})
 
 async def handle_arm(request):
-    """POST /api/arm — arm the vehicle"""
     log.info("ARM command received")
-    # MAVLink arm command sent by mavlink_module (hooked in Phase 2)
     return web.json_response({"status": "ARM_COMMANDED"})
 
 async def handle_disarm(request):
-    """POST /api/disarm — disarm the vehicle"""
     log.info("DISARM command received")
     return web.json_response({"status": "DISARM_COMMANDED"})
 
 async def handle_upload_mission(request):
-    """POST /api/mission/upload — upload waypoint list to AVS"""
     data = await request.json()
     waypoints = data.get("waypoints", [])
     log.info(f"Mission upload received: {len(waypoints)} waypoints")
     state["mission"]["waypoint_count"] = len(waypoints)
-    # MAVLink waypoint upload sent by mavlink_module (hooked in Phase 2)
     return web.json_response({"status": "UPLOAD_RECEIVED", "waypoints": len(waypoints)})
 
-async def handle_health(request):
-    """GET /api/health — daemon health check"""
-    return web.json_response({
-        "status":    "OK",
-        "timestamp": datetime.utcnow().isoformat(),
-        "mode":      state["system"]["mode"]
-    })
+async def handle_sdr_tune(request):
+    """POST /api/sdr/tune — retune SDR frequency"""
+    data = await request.json()
+    freq = data.get("frequency")
+    if freq:
+        state["sdr"]["frequency"] = freq
+        log.info(f"SDR retune commanded: {freq / 1e6:.3f} MHz")
+    return web.json_response({"status": "TUNED", "frequency": freq})
+
+async def handle_sdr_gain(request):
+    """POST /api/sdr/gain — adjust SDR gain"""
+    data = await request.json()
+    gain = data.get("gain")
+    if gain is not None:
+        state["sdr"]["gain"] = gain
+        log.info(f"SDR gain commanded: {gain} dB")
+    return web.json_response({"status": "GAIN_SET", "gain": gain})
+
+
+# SDR module reference for audio streaming (set in main)
+_sdr_module = None
+
+async def handle_sdr_audio(request):
+    """GET /api/sdr/audio — chunked raw PCM audio stream (48kHz mono int16)"""
+    global _sdr_module
+    if _sdr_module is None:
+        return web.Response(status=503, text='SDR not ready')
+    response = web.StreamResponse()
+    response.headers['Content-Type']  = 'audio/raw'
+    response.headers['X-Sample-Rate'] = '48000'
+    response.headers['X-Channels']    = '1'
+    response.headers['X-Bit-Depth']   = '16'
+    await response.prepare(request)
+    await _sdr_module.stream_audio(response)
+    return response
 
 # ── Background Tasks ──────────────────────────────────────────────────────────
 
 async def heartbeat_watchdog(config):
-    """
-    Monitor MAVLink heartbeat age.
-    If no heartbeat received within threshold, push AMBER alert.
-    Requirement: GCS-FT-FR-002 — detect link loss within 1 second.
-    """
     threshold = config.get("mavlink", {}).get("heartbeat_timeout_s", 3)
     log.info(f"Heartbeat watchdog started — timeout: {threshold}s")
     while True:
@@ -179,11 +192,10 @@ async def heartbeat_watchdog(config):
                 push_alert("INFO", "MAVLink link restored")
 
 async def system_clock(config):
-    """Update system timestamp and uptime every second."""
-    start = datetime.utcnow()
+    start = datetime.now(timezone.utc)
     while True:
         await asyncio.sleep(1)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         state["system"]["timestamp"] = now.isoformat()
         state["system"]["uptime"]    = int((now - start).total_seconds())
 
@@ -202,22 +214,29 @@ def build_app(config):
 
     app.middlewares.append(cors_middleware)
 
-    # Routes
-    app.router.add_get( "/api/health",          handle_health)
-    app.router.add_get( "/api/status",          handle_status)
-    app.router.add_get( "/api/telemetry",       handle_telemetry)
-    app.router.add_get( "/api/mission",         handle_mission)
-    app.router.add_get( "/api/sdr",             handle_sdr)
-    app.router.add_get( "/api/alerts",          handle_alerts)
-    app.router.add_post("/api/abort",           handle_abort)
-    app.router.add_post("/api/arm",             handle_arm)
-    app.router.add_post("/api/disarm",          handle_disarm)
-    app.router.add_post("/api/mission/upload",  handle_upload_mission)
+    app.router.add_get( "/api/health",         handle_health)
+    app.router.add_get( "/api/status",         handle_status)
+    app.router.add_get( "/api/telemetry",      handle_telemetry)
+    app.router.add_get( "/api/mission",        handle_mission)
+    app.router.add_get( "/api/sdr",            handle_sdr)
+    app.router.add_get( "/api/alerts",         handle_alerts)
+    app.router.add_post("/api/abort",          handle_abort)
+    app.router.add_post("/api/arm",            handle_arm)
+    app.router.add_post("/api/disarm",         handle_disarm)
+    app.router.add_post("/api/mission/upload", handle_upload_mission)
+    app.router.add_post("/api/sdr/tune",       handle_sdr_tune)
+    app.router.add_post("/api/sdr/gain",       handle_sdr_gain)
+    app.router.add_get( "/api/sdr/audio",      handle_sdr_audio)
 
-    # Static HMI files
+    async def handle_index(request):
+        hmi_path = os.path.join(os.path.dirname(__file__), "../hmi/index.html")
+        return web.FileResponse(hmi_path)
+
+    app.router.add_get("/", handle_index)
+
     hmi_path = os.path.join(os.path.dirname(__file__), "../hmi")
     if os.path.exists(hmi_path):
-        app.router.add_static("/", hmi_path, name="hmi")
+        app.router.add_static("/static", hmi_path, name="hmi")
 
     return app
 
@@ -230,29 +249,26 @@ async def main():
 
     log.info("=" * 60)
     log.info("RAVEN GCS Daemon — Starting")
-    log.info(f"Server: {host}:{port}")
+    log.info(f"Server:  {host}:{port}")
     log.info(f"MAVLink: {config.get('mavlink', {}).get('host')}:{config.get('mavlink', {}).get('port')}")
     log.info(f"SDR:     {config.get('sdr', {}).get('host')}:{config.get('sdr', {}).get('port')}")
     log.info("=" * 60)
 
-    # Build app
     app = build_app(config)
 
-    # Start background tasks
     asyncio.create_task(system_clock(config))
     asyncio.create_task(heartbeat_watchdog(config))
 
-    # MAVLink module - connects to SITL/Pixhawk, populates telemetry state
     from mavlink_module import MAVLinkModule
     mav = MAVLinkModule(config, state)
     asyncio.create_task(mav.run())
 
-    # SDR module — connects to rtl_tcp on Pi, populates spectrum state
+    global _sdr_module
     from sdr_module import SDRModule
     sdr = SDRModule(config, state)
+    _sdr_module = sdr
     asyncio.create_task(sdr.run())
 
-    # Start server
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, port)
@@ -261,7 +277,6 @@ async def main():
     log.info(f"RAVEN GCS online at http://{host}:{port}")
     log.info("Awaiting HMI connection...")
 
-    # Run forever
     try:
         await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
