@@ -18,6 +18,7 @@ import logging
 import os
 import signal
 import sys
+sys.path.insert(0, os.path.dirname(__file__))
 from datetime import datetime
 
 from aiohttp import web
@@ -241,9 +242,15 @@ async def main():
     asyncio.create_task(system_clock(config))
     asyncio.create_task(heartbeat_watchdog(config))
 
-    # MAVLink and SDR modules imported and started in Phase 2
-    # asyncio.create_task(mavlink_module.run(config, state))
-    # asyncio.create_task(sdr_module.run(config, state))
+    # MAVLink module - connects to SITL/Pixhawk, populates telemetry state
+    from mavlink_module import MAVLinkModule
+    mav = MAVLinkModule(config, state)
+    asyncio.create_task(mav.run())
+
+    # SDR module — connects to rtl_tcp on Pi, populates spectrum state
+    from sdr_module import SDRModule
+    sdr = SDRModule(config, state)
+    asyncio.create_task(sdr.run())
 
     # Start server
     runner = web.AppRunner(app)

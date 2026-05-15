@@ -46,3 +46,4 @@ node_modules/
 
 # Logs
 *.log
+data/rf_logs/
