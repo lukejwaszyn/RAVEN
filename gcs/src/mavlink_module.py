@@ -5,11 +5,20 @@ Reconnaissance Autonomous Vehicle with Electronic iNtelligence
 Responsibilities:
     - Maintain bidirectional MAVLink connection to AVS (SITL or Pixhawk)
     - Parse incoming MAVLink messages and update shared state
-    - Send commands: arm, disarm, RTL, waypoint upload, mode change
-    - Run heartbeat watchdog — detect link loss within 1s (GCS-FT-FR-002)
+    - Send commands: arm, disarm, RTL, mode change
+    - Full MAVLink mission upload protocol (request/response handshake)
+    - Heartbeat watchdog — detect link loss within 1s (GCS-FT-FR-002)
     - Message rate target: 4 Hz minimum (GCS-FT-PR-001)
 
 Connection: TCP to 127.0.0.1:5760 (SITL) or Pi MAVLink bridge (flight)
+
+Waypoint format (per item):
+    {
+        "lat": float,       # degrees
+        "lon": float,       # degrees
+        "alt": float,       # meters AGL
+        "command": int      # MAVLink command (default NAV_WAYPOINT = 16)
+    }
 
 Author: Luke J. Waszyn II | Penn State Engineering Science
 """
@@ -45,7 +54,6 @@ class MAVLinkModule:
     # ── Connection ────────────────────────────────────────────────────────────
 
     def _connect(self):
-        """Blocking MAVLink connection — called in executor to avoid blocking loop."""
         log.info(f"Connecting to MAVLink at {self.conn_str}")
         conn = mavutil.mavlink_connection(
             self.conn_str,
@@ -59,7 +67,6 @@ class MAVLinkModule:
         return conn
 
     async def connect(self):
-        """Async wrapper around blocking connect."""
         loop = asyncio.get_event_loop()
         try:
             self.connection = await loop.run_in_executor(None, self._connect)
@@ -77,58 +84,63 @@ class MAVLinkModule:
     # ── Message Parsing ───────────────────────────────────────────────────────
 
     def _parse_message(self, msg):
-        """Parse a single MAVLink message and update state."""
         msg_type = msg.get_type()
 
         if msg_type == "HEARTBEAT":
             self._last_heartbeat = time.monotonic()
             self.state["telemetry"]["connected"]   = True
             self.state["telemetry"]["flight_mode"] = mavutil.mode_string_v10(msg)
-            self.state["telemetry"]["armed"]       = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+            self.state["telemetry"]["armed"]       = bool(
+                msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
+            )
 
         elif msg_type == "GLOBAL_POSITION_INT":
             self.state["telemetry"]["lat"]         = msg.lat / 1e7
             self.state["telemetry"]["lon"]         = msg.lon / 1e7
-            self.state["telemetry"]["alt"]         = msg.relative_alt / 1000.0  # mm → m
-            self.state["telemetry"]["heading"]     = msg.hdg / 100.0            # cdeg → deg
+            self.state["telemetry"]["alt"]         = msg.relative_alt / 1000.0
+            self.state["telemetry"]["heading"]     = msg.hdg / 100.0
 
         elif msg_type == "VFR_HUD":
             self.state["telemetry"]["airspeed"]    = msg.airspeed
             self.state["telemetry"]["groundspeed"] = msg.groundspeed
 
         elif msg_type == "SYS_STATUS":
-            voltage = msg.voltage_battery / 1000.0  # mV → V
+            voltage = msg.voltage_battery / 1000.0
             self.state["telemetry"]["battery_v"]   = round(voltage, 2)
             self.state["telemetry"]["battery_pct"] = msg.battery_remaining
-
-            # Low battery alert
             if msg.battery_remaining < 20 and msg.battery_remaining >= 0:
-                self._push_alert("RED", f"LOW BATTERY: {msg.battery_remaining}%")
+                self._push_alert("RED",   f"LOW BATTERY: {msg.battery_remaining}%")
             elif msg.battery_remaining < 30 and msg.battery_remaining >= 0:
                 self._push_alert("AMBER", f"Battery warning: {msg.battery_remaining}%")
 
         elif msg_type == "GPS_RAW_INT":
-            self.state["telemetry"]["gps_fix"]     = msg.fix_type
+            self.state["telemetry"]["gps_fix"] = msg.fix_type
             if msg.fix_type < 3:
                 self._push_alert("AMBER", f"GPS fix degraded: type {msg.fix_type}")
 
         elif msg_type == "MISSION_CURRENT":
-            self.state["mission"]["current_wp"]    = msg.seq
-            self.state["mission"]["active"]        = True
+            self.state["mission"]["current_wp"] = msg.seq
+            self.state["mission"]["active"]     = True
 
         elif msg_type == "MISSION_COUNT":
             self.state["mission"]["waypoint_count"] = msg.count
-            log.info(f"Mission uploaded: {msg.count} waypoints")
+            log.info(f"Mission confirmed: {msg.count} waypoints")
+
+        elif msg_type == "MISSION_ACK":
+            if msg.type == 0:
+                log.info("Mission upload acknowledged — ACCEPTED")
+                self._push_alert("INFO", f"Mission uploaded — {self.state['mission']['waypoint_count']} waypoints accepted")
+                self.state["system"]["mode"] = "PREFLIGHT"
+            else:
+                log.error(f"Mission upload REJECTED — type {msg.type}")
+                self._push_alert("RED", f"Mission upload rejected by FC — error {msg.type}")
 
     # ── Heartbeat Age ─────────────────────────────────────────────────────────
 
     def _update_heartbeat_age(self):
-        """Update heartbeat age in state. Called every loop tick."""
         if self._last_heartbeat is not None:
             age = time.monotonic() - self._last_heartbeat
             self.state["telemetry"]["heartbeat_age"] = round(age, 2)
-
-            # Link loss detection — GCS-FT-FR-002
             timeout = self.mav_config.get("heartbeat_timeout_s", 3)
             if age > timeout and self.state["telemetry"]["connected"]:
                 self.state["telemetry"]["connected"] = False
@@ -140,23 +152,24 @@ class MAVLinkModule:
     # ── Commands ──────────────────────────────────────────────────────────────
 
     async def send_arm(self):
-        """Arm the vehicle."""
         await self._command_queue.put(("ARM", None))
 
     async def send_disarm(self):
-        """Disarm the vehicle."""
         await self._command_queue.put(("DISARM", None))
 
     async def send_rtl(self):
-        """Command Return to Launch."""
         await self._command_queue.put(("RTL", None))
 
     async def send_waypoints(self, waypoints: list):
-        """Upload waypoint list to vehicle."""
         await self._command_queue.put(("WAYPOINTS", waypoints))
 
+    async def send_takeoff(self, altitude: float = 20.0):
+        await self._command_queue.put(("TAKEOFF", altitude))
+
+    async def send_mode(self, mode: str):
+        await self._command_queue.put(("MODE", mode))
+
     def _execute_command(self, cmd, data):
-        """Execute a MAVLink command — blocking, called in executor."""
         if self.connection is None:
             log.warning("Cannot send command — no MAVLink connection")
             return
@@ -173,16 +186,136 @@ class MAVLinkModule:
             self.connection.set_mode("RTL")
             log.warning("RTL command sent")
 
+        elif cmd == "MODE":
+            self.connection.set_mode(data)
+            log.info(f"Mode change: {data}")
+
+        elif cmd == "TAKEOFF":
+            alt = data if data else 20.0
+            self.connection.mav.command_long_send(
+                self.connection.target_system,
+                self.connection.target_component,
+                mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+                0, 0, 0, 0, 0, 0, 0, alt
+            )
+            log.info(f"TAKEOFF command sent — altitude {alt}m")
+
         elif cmd == "WAYPOINTS":
-            log.info(f"Uploading {len(data)} waypoints")
-            self.connection.waypoint_count_send(len(data))
+            self._upload_mission(data)
+
+    def _upload_mission(self, waypoints: list):
+        """
+        Full MAVLink mission upload protocol.
+        Handles the request/response handshake with the flight controller.
+
+        Protocol:
+            GCS → MISSION_COUNT
+            FC  → MISSION_REQUEST_INT (item 0)
+            GCS → MISSION_ITEM_INT (item 0)
+            FC  → MISSION_REQUEST_INT (item 1)
+            ...repeat...
+            FC  → MISSION_ACK
+
+        Waypoint list always starts with a home waypoint (item 0)
+        followed by NAV_WAYPOINT items.
+        """
+        if not waypoints:
+            log.warning("Empty waypoint list — upload aborted")
+            return
+
+        conn = self.connection
+        n_wps = len(waypoints) + 1  # +1 for home waypoint at index 0
+        log.info(f"Uploading mission: {len(waypoints)} waypoints ({n_wps} total with home)")
+
+        self.state["mission"]["waypoint_count"] = len(waypoints)
+
+        # Send mission count
+        conn.mav.mission_count_send(
+            conn.target_system,
+            conn.target_component,
+            n_wps,
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+        )
+
+        # Handle request/response loop
+        items_sent = 0
+        timeout    = 10  # seconds
+        start      = time.time()
+
+        while items_sent < n_wps:
+            if time.time() - start > timeout:
+                log.error("Mission upload timeout")
+                self._push_alert("RED", "Mission upload timed out")
+                return
+
+            msg = conn.recv_match(
+                type=["MISSION_REQUEST", "MISSION_REQUEST_INT", "MISSION_ACK"],
+                blocking=True,
+                timeout=5
+            )
+
+            if msg is None:
+                log.warning("No response from FC during mission upload")
+                continue
+
+            msg_type = msg.get_type()
+
+            if msg_type in ("MISSION_REQUEST", "MISSION_REQUEST_INT"):
+                seq = msg.seq
+                log.info(f"FC requested item {seq}")
+
+                if seq == 0:
+                    # Home waypoint — current position, loiter
+                    conn.mav.mission_item_int_send(
+                        conn.target_system,
+                        conn.target_component,
+                        0,                                          # seq
+                        mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                        mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                        1,                                          # current (home)
+                        1,                                          # autocontinue
+                        0, 0, 0, 0,                                 # params 1-4
+                        0, 0, 0,                                    # lat/lon/alt = 0 (use current)
+                        mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+                    )
+                else:
+                    # Mission waypoint
+                    wp  = waypoints[seq - 1]
+                    lat = int(wp["lat"] * 1e7)
+                    lon = int(wp["lon"] * 1e7)
+                    alt = float(wp.get("alt", 30.0))
+                    cmd = wp.get("command", mavutil.mavlink.MAV_CMD_NAV_WAYPOINT)
+
+                    conn.mav.mission_item_int_send(
+                        conn.target_system,
+                        conn.target_component,
+                        seq,
+                        mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                        cmd,
+                        0,      # not current
+                        1,      # autocontinue
+                        0, 0, 0, float("nan"),   # params 1-4 (hold time, radius, pass, yaw)
+                        lat, lon, alt,
+                        mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+                    )
+
+                items_sent = seq + 1
+
+            elif msg_type == "MISSION_ACK":
+                if msg.type == 0:
+                    log.info("Mission upload complete — ACCEPTED")
+                else:
+                    log.error(f"Mission upload REJECTED — error {msg.type}")
+                return
+
+        log.info("Mission upload loop complete")
 
     # ── Main Run Loop ─────────────────────────────────────────────────────────
 
     async def run(self):
         """
         Main async run loop.
-        Connects to MAVLink, then spins reading messages and processing commands.
+        Connects to MAVLink, spins reading messages and processing commands.
         Requirement: GCS-FT-PR-001 — sustain MAVLink at 4 Hz minimum.
         """
         self.running = True
@@ -192,7 +325,6 @@ class MAVLinkModule:
 
         while self.running:
             try:
-                # Non-blocking message read — run in executor to not block event loop
                 msg = await loop.run_in_executor(
                     None,
                     lambda: self.connection.recv_match(blocking=False) if self.connection else None
@@ -201,10 +333,8 @@ class MAVLinkModule:
                 if msg and msg.get_type() != "BAD_DATA":
                     self._parse_message(msg)
 
-                # Update heartbeat age every tick
                 self._update_heartbeat_age()
 
-                # Process any queued commands
                 if not self._command_queue.empty():
                     cmd, data = await self._command_queue.get()
                     await loop.run_in_executor(None, self._execute_command, cmd, data)
@@ -224,8 +354,6 @@ class MAVLinkModule:
         if self.connection:
             self.connection.close()
         log.info("MAVLink module stopped")
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _push_alert(self, level: str, message: str):
         self.state["alerts"].append({

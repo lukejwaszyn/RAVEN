@@ -294,7 +294,8 @@ html, body {
 .map-overlay {
   position: absolute;
   top: 44px;
-  left: 8px;
+  right: 8px;
+  left: auto;
   z-index: 1000;
   background: rgba(8,12,15,0.85);
   border: 1px solid var(--border);
@@ -502,6 +503,181 @@ html, body {
 
 .sdr-preset-btn:hover { color: var(--blue); border-color: var(--blue); }
 
+/* ── Mission Planner ────────────────────────────────────────── */
+.mission-planner {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 1000;
+  background: rgba(8,12,15,0.92);
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  padding: 8px;
+  min-width: 220px;
+  max-width: 260px;
+  font-family: var(--font-mono);
+}
+
+.planner-header {
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.planner-mode {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.planner-mode.active {
+  background: var(--blue-dim);
+  color: var(--blue);
+  border: 1px solid var(--blue);
+}
+
+.planner-mode.inactive {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.wp-list {
+  max-height: 120px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.wp-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 10px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.wp-item:last-child { border-bottom: none; }
+
+.wp-seq {
+  color: var(--amber);
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.wp-coords {
+  flex: 1;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.wp-alt-input {
+  width: 40px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 3px;
+  text-align: right;
+}
+
+.wp-remove {
+  color: var(--red);
+  cursor: pointer;
+  font-size: 11px;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.wp-remove:hover { color: #ff6b6b; }
+
+.wp-empty {
+  font-size: 9px;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 8px 0;
+}
+
+.planner-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.planner-btn {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 3px 6px;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.planner-btn.upload {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-dim);
+}
+
+.planner-btn.upload:hover { background: #006630; }
+.planner-btn.upload:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.planner-btn.clear {
+  color: var(--red);
+  border-color: var(--red);
+  background: transparent;
+}
+
+.planner-btn.clear:hover { background: var(--red-dim); }
+
+.planner-btn.auto {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: transparent;
+}
+
+.planner-btn.auto:hover { background: var(--amber-dim); }
+
+.wp-default-alt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 5px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.wp-default-alt input {
+  width: 44px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 4px;
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -632,6 +808,35 @@ html, body {
     <div class="map-overlay" id="map-overlay">
       GCS &nbsp;|&nbsp; <span id="overlay-coord">—</span>
     </div>
+
+    <!-- Mission Planner Overlay -->
+    <div class="mission-planner" id="mission-planner">
+      <div class="planner-header">
+        <span>WAYPOINT PLANNER</span>
+        <button class="planner-mode inactive" id="plan-mode-btn" onclick="togglePlanMode()">
+          + PLACE
+        </button>
+      </div>
+      <div class="wp-default-alt">
+        <span>DEFAULT ALT (m):</span>
+        <input type="number" id="wp-default-alt" value="30" min="5" max="400" step="5"/>
+      </div>
+      <div class="wp-list" id="wp-list">
+        <div class="wp-empty" id="wp-empty">Click map to place waypoints</div>
+      </div>
+      <div class="planner-actions">
+        <button class="planner-btn upload" id="upload-btn"
+                onclick="uploadMission()" disabled>
+          ↑ UPLOAD
+        </button>
+        <button class="planner-btn auto" onclick="setAutoMode()">
+          AUTO
+        </button>
+        <button class="planner-btn clear" onclick="clearWaypoints()">
+          CLR
+        </button>
+      </div>
+      </div>
   </div>
 
   <!-- ── Right Panel — SDR ── -->
@@ -763,6 +968,13 @@ function initMap(lat, lon) {
   }).addTo(map);
 
   waypointLayer = L.layerGroup().addTo(map);
+
+  // Map click — add waypoint if plan mode active
+  map.on('click', function(e) {
+    if (!planModeActive) return;
+    addWaypoint(e.latlng.lat, e.latlng.lng);
+  });
+
   mapInitialized = true;
 }
 
@@ -1039,6 +1251,180 @@ function updateSDR(sdr) {
     drawSpectrum(sdr.spectrum);
     drawWaterfall(sdr.spectrum);
   }
+}
+
+// ── Waypoint Planner ─────────────────────────────────────────
+let waypoints       = [];        // [{lat, lon, alt}, ...]
+let wpMarkers       = [];        // Leaflet markers
+let wpPathLine      = null;      // Leaflet polyline
+let planModeActive  = false;
+
+function togglePlanMode() {
+  planModeActive = !planModeActive;
+  const btn = document.getElementById('plan-mode-btn');
+  btn.textContent = planModeActive ? '✓ PLACING' : '+ PLACE';
+  btn.className   = 'planner-mode ' + (planModeActive ? 'active' : 'inactive');
+  if (map) {
+    map.getContainer().style.cursor = planModeActive ? 'crosshair' : '';
+  }
+}
+
+function getDefaultAlt() {
+  return parseFloat(document.getElementById('wp-default-alt').value) || 30;
+}
+
+function addWaypoint(lat, lon) {
+  const alt = getDefaultAlt();
+  const seq = waypoints.length + 1;
+  waypoints.push({ lat, lon, alt });
+
+  // Marker on map
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      background:var(--amber,#ffc107);
+      border:2px solid #fff;
+      border-radius:50%;
+      width:14px;height:14px;
+      display:flex;align-items:center;justify-content:center;
+      font-family:monospace;font-size:8px;font-weight:bold;
+      color:#000;line-height:1;">
+      ${seq}
+    </div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
+  });
+
+  const marker = L.marker([lat, lon], { icon })
+    .addTo(map)
+    .bindTooltip(`WP${seq} | ${lat.toFixed(5)}, ${lon.toFixed(5)} | ${alt}m`);
+
+  wpMarkers.push(marker);
+  updateWpPath();
+  renderWpList();
+  document.getElementById('upload-btn').disabled = waypoints.length === 0;
+}
+
+function removeWaypoint(idx) {
+  waypoints.splice(idx, 1);
+  wpMarkers[idx].remove();
+  wpMarkers.splice(idx, 1);
+
+  // Re-number remaining markers
+  wpMarkers.forEach((m, i) => {
+    const wp = waypoints[i];
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="
+        background:var(--amber,#ffc107);
+        border:2px solid #fff;border-radius:50%;
+        width:14px;height:14px;
+        display:flex;align-items:center;justify-content:center;
+        font-family:monospace;font-size:8px;font-weight:bold;
+        color:#000;line-height:1;">${i + 1}</div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    });
+    m.setIcon(icon);
+    m.setTooltipContent(`WP${i+1} | ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)} | ${wp.alt}m`);
+  });
+
+  updateWpPath();
+  renderWpList();
+  document.getElementById('upload-btn').disabled = waypoints.length === 0;
+}
+
+function updateWpAlt(idx, val) {
+  waypoints[idx].alt = parseFloat(val) || 30;
+}
+
+function updateWpPath() {
+  if (wpPathLine) { wpPathLine.remove(); wpPathLine = null; }
+  if (waypoints.length < 2) return;
+  const latlngs = waypoints.map(wp => [wp.lat, wp.lon]);
+  wpPathLine = L.polyline(latlngs, {
+    color: '#ffc107',
+    weight: 1.5,
+    opacity: 0.8,
+    dashArray: '6 4'
+  }).addTo(map);
+}
+
+function renderWpList() {
+  const list  = document.getElementById('wp-list');
+  const empty = document.getElementById('wp-empty');
+
+  if (waypoints.length === 0) {
+    list.innerHTML = '<div class="wp-empty" id="wp-empty">Click map to place waypoints</div>';
+    return;
+  }
+
+  list.innerHTML = waypoints.map((wp, i) => `
+    <div class="wp-item">
+      <span class="wp-seq">${i + 1}</span>
+      <span class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lon.toFixed(4)}</span>
+      <input class="wp-alt-input" type="number"
+             value="${wp.alt}" min="5" max="400"
+             onchange="updateWpAlt(${i}, this.value)"
+             title="Altitude (m)"/>
+      <button class="wp-remove" onclick="removeWaypoint(${i})" title="Remove">✕</button>
+    </div>
+  `).join('');
+}
+
+function clearWaypoints() {
+  waypoints = [];
+  wpMarkers.forEach(m => m.remove());
+  wpMarkers = [];
+  if (wpPathLine) { wpPathLine.remove(); wpPathLine = null; }
+  renderWpList();
+  document.getElementById('upload-btn').disabled = true;
+  planModeActive = false;
+  const btn = document.getElementById('plan-mode-btn');
+  btn.textContent = '+ PLACE';
+  btn.className   = 'planner-mode inactive';
+  if (map) map.getContainer().style.cursor = '';
+}
+
+async function uploadMission() {
+  if (waypoints.length === 0) return;
+  const btn = document.getElementById('upload-btn');
+  btn.textContent = 'UPLOADING...';
+  btn.disabled    = true;
+
+  try {
+    const res = await fetch(API_BASE + '/api/mission/upload', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ waypoints })
+    });
+    const data = await res.json();
+    btn.textContent = '✓ UPLOADED';
+    btn.style.color = 'var(--green)';
+    setTimeout(() => {
+      btn.textContent  = '↑ UPLOAD';
+      btn.style.color  = '';
+      btn.disabled     = false;
+    }, 3000);
+  } catch(e) {
+    btn.textContent = 'FAILED';
+    btn.style.color = 'var(--red)';
+    setTimeout(() => {
+      btn.textContent = '↑ UPLOAD';
+      btn.style.color = '';
+      btn.disabled    = false;
+    }, 3000);
+  }
+}
+
+async function setAutoMode() {
+  try {
+    await fetch(API_BASE + '/api/mode', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ mode: 'AUTO' })
+    });
+  } catch(e) { console.error('Mode change failed:', e); }
 }
 
 // ── SDR Audio ─────────────────────────────────────────────────

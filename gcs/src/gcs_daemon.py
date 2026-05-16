@@ -128,11 +128,26 @@ async def handle_disarm(request):
     return web.json_response({"status": "DISARM_COMMANDED"})
 
 async def handle_upload_mission(request):
+    global _mav_module
     data = await request.json()
     waypoints = data.get("waypoints", [])
     log.info(f"Mission upload received: {len(waypoints)} waypoints")
     state["mission"]["waypoint_count"] = len(waypoints)
+    if _mav_module:
+        await _mav_module.send_waypoints(waypoints)
     return web.json_response({"status": "UPLOAD_RECEIVED", "waypoints": len(waypoints)})
+
+
+async def handle_mode(request):
+    """POST /api/mode — set flight mode"""
+    global _mav_module
+    data = await request.json()
+    mode = data.get('mode', 'STABILIZE')
+    log.info(f'Mode change commanded: {mode}')
+    if _mav_module:
+        await _mav_module.send_mode(mode)
+    state['system']['mode'] = 'MISSION' if mode == 'AUTO' else state['system']['mode']
+    return web.json_response({'status': 'MODE_COMMANDED', 'mode': mode})
 
 async def handle_sdr_tune(request):
     """POST /api/sdr/tune — retune SDR frequency"""
@@ -152,6 +167,9 @@ async def handle_sdr_gain(request):
         log.info(f"SDR gain commanded: {gain} dB")
     return web.json_response({"status": "GAIN_SET", "gain": gain})
 
+
+# Module references for command routing
+_mav_module = None
 
 # SDR module reference for audio streaming (set in main)
 _sdr_module = None
@@ -224,6 +242,7 @@ def build_app(config):
     app.router.add_post("/api/arm",            handle_arm)
     app.router.add_post("/api/disarm",         handle_disarm)
     app.router.add_post("/api/mission/upload", handle_upload_mission)
+    app.router.add_post("/api/mode",            handle_mode)
     app.router.add_post("/api/sdr/tune",       handle_sdr_tune)
     app.router.add_post("/api/sdr/gain",       handle_sdr_gain)
     app.router.add_get( "/api/sdr/audio",      handle_sdr_audio)
@@ -259,8 +278,10 @@ async def main():
     asyncio.create_task(system_clock(config))
     asyncio.create_task(heartbeat_watchdog(config))
 
+    global _mav_module
     from mavlink_module import MAVLinkModule
     mav = MAVLinkModule(config, state)
+    _mav_module = mav
     asyncio.create_task(mav.run())
 
     global _sdr_module
