@@ -1,0 +1,31 @@
+{
+    "mavlink": {
+        "connection":   "tcp",
+        "serial_port":  "/dev/ttyAMA0",
+        "baud":         921600,
+        "sitl_host":    "192.168.68.52",
+        "sitl_port":    5760,
+        "gcs_host":     "0.0.0.0",
+        "gcs_port":     14550
+    },
+    "sdr": {
+        "bind_host":    "0.0.0.0",
+        "port":         1234,
+        "gain":         40,
+        "frequency":    100000000,
+        "sample_rate":  2400000
+    },
+    "lidar": {
+        "port":         "/dev/ttyUSB0",
+        "baud":         115200,
+        "stub_mode":    true
+    },
+    "gpsd": {
+        "host":         "127.0.0.1",
+        "port":         2947
+    },
+    "logging": {
+        "lidar_log_dir": "/home/lukejwaszyn/RAVEN/data/lidar_logs",
+        "rf_log_dir":    "/home/lukejwaszyn/RAVEN/data/rf_logs"
+    }
+}
