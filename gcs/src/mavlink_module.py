@@ -25,6 +25,7 @@ Author: Luke J. Waszyn II | Penn State Engineering Science
 
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timezone
 
@@ -95,10 +96,15 @@ class MAVLinkModule:
             )
 
         elif msg_type == "GLOBAL_POSITION_INT":
-            self.state["telemetry"]["lat"]         = msg.lat / 1e7
-            self.state["telemetry"]["lon"]         = msg.lon / 1e7
-            self.state["telemetry"]["alt"]         = msg.relative_alt / 1000.0
-            self.state["telemetry"]["heading"]     = msg.hdg / 100.0
+            self.state["telemetry"]["lat"]     = msg.lat / 1e7
+            self.state["telemetry"]["lon"]     = msg.lon / 1e7
+            self.state["telemetry"]["alt"]     = msg.relative_alt / 1000.0
+            self.state["telemetry"]["heading"] = msg.hdg / 100.0
+
+        elif msg_type == "ATTITUDE":
+            self.state["telemetry"]["roll"]  = math.degrees(msg.roll)
+            self.state["telemetry"]["pitch"] = math.degrees(msg.pitch)
+            self.state["telemetry"]["yaw"]   = math.degrees(msg.yaw)
 
         elif msg_type == "VFR_HUD":
             self.state["telemetry"]["airspeed"]    = msg.airspeed
@@ -209,27 +215,23 @@ class MAVLinkModule:
         Handles the request/response handshake with the flight controller.
 
         Protocol:
-            GCS → MISSION_COUNT
-            FC  → MISSION_REQUEST_INT (item 0)
-            GCS → MISSION_ITEM_INT (item 0)
-            FC  → MISSION_REQUEST_INT (item 1)
+            GCS -> MISSION_COUNT
+            FC  -> MISSION_REQUEST_INT (item 0)
+            GCS -> MISSION_ITEM_INT (item 0)
+            FC  -> MISSION_REQUEST_INT (item 1)
             ...repeat...
-            FC  → MISSION_ACK
-
-        Waypoint list always starts with a home waypoint (item 0)
-        followed by NAV_WAYPOINT items.
+            FC  -> MISSION_ACK
         """
         if not waypoints:
             log.warning("Empty waypoint list — upload aborted")
             return
 
-        conn = self.connection
-        n_wps = len(waypoints) + 1  # +1 for home waypoint at index 0
+        conn  = self.connection
+        n_wps = len(waypoints) + 1
         log.info(f"Uploading mission: {len(waypoints)} waypoints ({n_wps} total with home)")
 
         self.state["mission"]["waypoint_count"] = len(waypoints)
 
-        # Send mission count
         conn.mav.mission_count_send(
             conn.target_system,
             conn.target_component,
@@ -237,9 +239,8 @@ class MAVLinkModule:
             mavutil.mavlink.MAV_MISSION_TYPE_MISSION
         )
 
-        # Handle request/response loop
         items_sent = 0
-        timeout    = 10  # seconds
+        timeout    = 10
         start      = time.time()
 
         while items_sent < n_wps:
@@ -265,21 +266,18 @@ class MAVLinkModule:
                 log.info(f"FC requested item {seq}")
 
                 if seq == 0:
-                    # Home waypoint — current position, loiter
                     conn.mav.mission_item_int_send(
                         conn.target_system,
                         conn.target_component,
-                        0,                                          # seq
+                        0,
                         mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
                         mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
-                        1,                                          # current (home)
-                        1,                                          # autocontinue
-                        0, 0, 0, 0,                                 # params 1-4
-                        0, 0, 0,                                    # lat/lon/alt = 0 (use current)
+                        1, 1,
+                        0, 0, 0, 0,
+                        0, 0, 0,
                         mavutil.mavlink.MAV_MISSION_TYPE_MISSION
                     )
                 else:
-                    # Mission waypoint
                     wp  = waypoints[seq - 1]
                     lat = int(wp["lat"] * 1e7)
                     lon = int(wp["lon"] * 1e7)
@@ -292,9 +290,8 @@ class MAVLinkModule:
                         seq,
                         mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
                         cmd,
-                        0,      # not current
-                        1,      # autocontinue
-                        0, 0, 0, float("nan"),   # params 1-4 (hold time, radius, pass, yaw)
+                        0, 1,
+                        0, 0, 0, float("nan"),
                         lat, lon, alt,
                         mavutil.mavlink.MAV_MISSION_TYPE_MISSION
                     )
@@ -313,11 +310,6 @@ class MAVLinkModule:
     # ── Main Run Loop ─────────────────────────────────────────────────────────
 
     async def run(self):
-        """
-        Main async run loop.
-        Connects to MAVLink, spins reading messages and processing commands.
-        Requirement: GCS-FT-PR-001 — sustain MAVLink at 4 Hz minimum.
-        """
         self.running = True
         await self.connect()
 
@@ -339,7 +331,6 @@ class MAVLinkModule:
                     cmd, data = await self._command_queue.get()
                     await loop.run_in_executor(None, self._execute_command, cmd, data)
 
-                # 4 Hz poll rate — GCS-FT-PR-001
                 await asyncio.sleep(0.25)
 
             except Exception as e:

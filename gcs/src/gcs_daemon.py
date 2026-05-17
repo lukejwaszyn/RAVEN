@@ -58,6 +58,9 @@ state = {
         "flight_mode":   None,
         "armed":         False,
         "heartbeat_age": None,
+        "roll":          None,
+        "pitch":         None,
+        "yaw":           None,
     },
     "mission": {
         "active":         False,
