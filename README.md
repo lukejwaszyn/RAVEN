@@ -292,7 +292,7 @@ The MBSE treatment -- formal requirements, System Composer architecture, Simulin
 - [x] Fused RF + terrain data product
 - [x] 71 formally traced requirements (MATLAB Requirements Toolbox)
 - [x] L0-L2 System Composer architecture
-- [ ] Simulink digital twin with Unreal Engine visualization
+- [x] Simulink digital twin
 - [ ] Physical UAV build (hardware pending)
 - [ ] Verified autonomous data flight (V4-V6)
 - [ ] Published technical report
